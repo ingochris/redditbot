@@ -1,6 +1,7 @@
 from collections import defaultdict
 import operator
 import re
+import random
 import time
 import urllib2
 from urlparse import urlparse
@@ -18,8 +19,12 @@ from base import PMTriggeredBot, CommentTriggeredBot, SubmissionTriggeredBot, My
 import settings
 
 
-FULL_EMOTE_REGEX = re.compile('\[[^\[\]\(\)/]*\]\(/[^\[\]\(\)/]*\)')
-EMOTE_REGEX = re.compile('/[a-zA-Z0-9_]+')
+FULL_EMOTE_REGEX = re.compile(r"""\[[^[\]]*\]\s*\(\s*(\S+)\s*(["'].*?["'])?\s*\)""")
+#FULL_EMOTE_REGEX = re.compile(r"""\[[^[\]]*\]\s*\(/([0-9a-zA-Z_#-]+)\s*(["'].*?["'])?\s*\)""")
+#FULL_EMOTE_REGEX = re.compile('\[[^\[\]\(\)/]*\]\(/[^\[\]\(\)/]*\)')
+EMOTE_REGEX = re.compile('^/[0-9a-zA-Z_#]+')
+#EMOTE_REGEX = re.compile('[0-9a-zA-Z_#]+')
+#EMOTE_REGEX = re.compile('/[a-zA-Z0-9_]+')
 
 VALID_ULR_CHARS_REGEX = "[a-zA-Z0-9\-_.~!*'();:@&=+$,/?#[\]]"
 XKCD_URL_REGEX = re.compile('(https?://(?:www\.)?(?:imgs\.)?xkcd.com/(?:(?:\d+)|(?:%s+\.[a-zA-Z]+)))' % VALID_ULR_CHARS_REGEX)
@@ -30,10 +35,12 @@ XKCD_JSON_API_URL = 'http://xkcd.com/{comic_id}/info.0.json'
 IMGUR_JSON_API_URL = 'https://api.imgur.com/3/image/{image_id}.json'
 
 REDDIT_PM_IGNORE = "http://reddit.com/message/compose/?to=xkcd_transcriber&subject=ignore%20me&message=ignore%20me"
+REDDIT_PM_DELETE = "http://reddit.com/message/compose/?to=xkcd_transcriber&subject=delete&message=delete%20{thing_id}"
 NO_BREAK_SPACE = u'\u00A0'
 MAX_MESSAGE_LENGTH = 10000
 
-PONY_SUBS = ["mylittlepony", "mlplounge", "ploungeafterdark", "mylittlefriends"]
+PONY_SUBS = ["mylittlepony", "mlplounge", "ploungeafterdark", "mylittlefriends", "mylittleandysonic1"]
+PONY_SECRETS = [u'[](/adorkable "%s")']
 
 XKCD_SIG_LINKS = [
     u'[xkcd.com](http://www.xkcd.com)',
@@ -66,7 +73,8 @@ class TopEmotesBot(PMTriggeredBot):
             matches = re.findall(FULL_EMOTE_REGEX, comment.body)
             if matches:
                 for match in matches:
-                    emote = re.search(EMOTE_REGEX, match)
+                    raw_emote = match[0]
+                    emote = re.search(EMOTE_REGEX, raw_emote)
                     if emote:
                         emotes_dict[emote.group(0).lower()] += 1
 
@@ -343,6 +351,9 @@ class CommentXkcdBot(CommentTriggeredBot):
         if comment.subreddit.display_name.lower().find('xkcd') != -1:
             return False
 
+        if comment.subreddit.display_name.lower() == 'jerktalkdiamond':
+            return False
+
         #if comment.body.lower().find('imgur.com') == -1:
         #if comment.body.lower().find('xkcd.com') == -1 and comment.body.lower().find('imgur.com') == -1:
         if comment.body.lower().find('xkcd.com') == -1:
@@ -386,12 +397,23 @@ class CommentXkcdBot(CommentTriggeredBot):
             return self._process_urls(comment, urls)
 
     def _process_urls(self, comment, urls):
-        secret = ""
-        if comment.subreddit.display_name.lower() in PONY_SUBS:
-            secret = "[](/twibeam) "
+        # Check for secret hi message
+        secret_message = ""
+        matches = re.findall(FULL_EMOTE_REGEX, comment.body)
+        if matches:
+            for match in matches:
+                message = match[1]
+                if message.find("xkcd_transcriber") != -1:
+                    secret_message = "Hello, " + comment.author.name if comment.author else '[deleted]'
+                    break
+                        
+        # Secret emote
+        secret_emote = ""
+        if comment.subreddit.display_name.lower() in PONY_SUBS or secret_message:
+            secret_emote = random.choice(PONY_SECRETS) % secret_message + " "
 
-        reply_msg_sig = '---\n' + secret + ' ^| '.join(['^' + a for a in XKCD_SIG_LINKS])
-        reply_msg_body = ''
+        reply_msg_sig = '---\n' + ' ^| '.join(['^' + a for a in XKCD_SIG_LINKS])
+        reply_msg_body = secret_emote
         comics_parsed = set()
 
         # Check each URL for an xkcd reference
@@ -405,7 +427,7 @@ class CommentXkcdBot(CommentTriggeredBot):
                     link = comment.permalink
                     self.data_store.insert_xkcd_event(data.get('num'), timestamp, sub, author, link, data.get('from_external', False))
 
-                if reply_msg_body != '':
+                if reply_msg_body != '' and reply_msg_body != secret_emote:
                     reply_msg_body += u'----\n'
 
                 if url.find('imgs') != -1 or data.get('from_external') is True:
@@ -434,7 +456,14 @@ class CommentXkcdBot(CommentTriggeredBot):
         reply_msg = reply_msg_body + reply_msg_sig
 
         # Reply to the user
-        return self._attempt_reply(comment, reply_msg)
+        r = self._attempt_reply(comment, reply_msg)
+        if r == True or r == False or r == None:
+            return True
+
+        # Edited comment
+        reply_msg_sig += ' ^| ^[Delete](%s)' % REDDIT_PM_DELETE.format(thing_id=r.name)
+        reply_msg = reply_msg_body + reply_msg_sig
+        return self._attempt_edit(r, reply_msg)
 
     def _attempt_reply(self, message, reply_msg):
         # Ensure I can respond to the user
@@ -444,15 +473,24 @@ class CommentXkcdBot(CommentTriggeredBot):
 
         # Reply to the user
         try:
-            self.bot.reply(message.name, reply_msg)
+            r = self.bot.reply(message.name, reply_msg)
             #write_line(reply_msg)
             write_line(' => Reply Sent!')
+            return r
         except Exception as e:
             write_line(' => Exception while replying in CommentXkcdBot.')
             write_err(e)
             return False
 
-        return True
+    def _attempt_edit(self, message, new_message):
+        # Edit the comment
+        try:
+            message.edit(new_message)
+            return True
+        except Exception as e:
+            write_line(' => Exception while editing in CommentXkcdBot.')
+            write_err(e)
+            return False
 
     def _get_urls(self, text):
         all = re.findall(XKCD_URL_REGEX, text)
@@ -483,6 +521,17 @@ class PMXkcdBot(PMTriggeredBot):
                 write_line(' => Exception while replying in PMXkcdBot.')
                 write_err(e)
                 return False
+
+        if mail.body.startswith('delete') and mail.author:
+            parts = mail.body.split(' ')
+            if len(parts) == 2:
+                thing_id = parts[1]
+                obj = self.bot.get_refreshed(thing_id)
+                if obj:
+                    parent = self.bot.get_refreshed(obj.parent_id)
+                    if parent and parent.author and parent.author.name == mail.author.name:
+                        obj.delete()
+                        write_line(' => Comment Deleted!')
 
         mail.mark_as_read()
         return True

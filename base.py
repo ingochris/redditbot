@@ -70,11 +70,12 @@ class RedditAPI(object):
         mine = self.get_refreshed(thing_id)
         try:
             if isinstance(mine, praw.objects.Submission):
-                mine.add_comment(text)
+                return mine.add_comment(text)
             else:
-                mine.reply(text)
+                return mine.reply(text)
         except Exception as e:
             write_err(e)
+        return None
 
     def get_refreshed(self, thing_id):
         try:
@@ -234,6 +235,7 @@ class CommentTriggeredBot(Bot):
         super(CommentTriggeredBot, self).__init__(*args, **kwargs)
 
     # shhhh
+    # tricking the cache
     def _get_content(self):
         if self.subreddit == 'all':
             self.subreddit = 'all+null1'
