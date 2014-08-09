@@ -44,7 +44,7 @@ PONY_SECRETS = [u'[](/adorkable "%s")']
 
 XKCD_SIG_LINKS = [
     u'[xkcd.com](http://www.xkcd.com)',
-    u'[xkcd%ssub](http://www.reddit.com/r/xkcdcomic/)/[kerfuffle](http://www.reddit.com/r/self/comments/1xdwba/the_history_of_the_rxkcd_kerfuffle/)' % NO_BREAK_SPACE,
+    u'[xkcd%ssub](http://www.reddit.com/r/xkcd/)' % NO_BREAK_SPACE,
     u'[Problems/Bugs?](http://www.reddit.com/r/xkcd_transcriber/)',
     u'[Statistics](http://xkcdref.info/statistics/)',
     u'[Stop%sReplying](%s)' % (NO_BREAK_SPACE, REDDIT_PM_IGNORE),
@@ -263,7 +263,7 @@ class XkcdFetcher(object):
 
     def _get_xkcd_json(self, comic_id):
         if int(comic_id) == 404:
-            return {'title': '404', 'transcript': '404', 'alt': '404'}
+            return {'title': '404', 'transcript': '404', 'alt': '404', 'img': '', 'num': 404}
 
         try:
             response = urllib2.urlopen(XKCD_JSON_API_URL.format(comic_id=comic_id))

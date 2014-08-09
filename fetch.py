@@ -20,7 +20,7 @@ class MyOpener(FancyURLopener):
 
 def get_xkcd_json(comic_id):
     if int(comic_id) == 404:
-        return {'title': '404', 'transcript': '404', 'alt': '404', 'img': ''}
+        return {'title': '404', 'transcript': '404', 'alt': '404', 'img': '', 'num': 404}
 
     try:
         response = urllib2.urlopen(XKCD_JSON_API_URL.format(comic_id=comic_id))
